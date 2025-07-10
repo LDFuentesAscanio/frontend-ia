@@ -10,20 +10,21 @@ type Message = {
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Para hacer scroll automático hacia el último mensaje
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   const sendMessage = async () => {
     const trimmedInput = input.trim();
-    if (!trimmedInput) return;
+    if (!trimmedInput || isLoading) return;
 
     const userMessage: Message = { from: 'user', text: trimmedInput };
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
+    setIsLoading(true);
 
     try {
       const res = await fetch('/api/chat', {
@@ -32,27 +33,38 @@ export default function ChatPage() {
         body: JSON.stringify({ message: trimmedInput }),
       });
 
-      if (!res.ok) throw new Error('Error en la respuesta del servidor');
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(
+          errorData.reply || 'Error en la respuesta del servidor'
+        );
+      }
 
       const data = await res.json();
 
-      if (!data.reply || typeof data.reply !== 'string')
+      if (!data.reply || typeof data.reply !== 'string') {
         throw new Error('Respuesta inválida del servidor');
+      }
 
       const botMessage: Message = { from: 'bot', text: data.reply };
       setMessages((prev) => [...prev, botMessage]);
-    } catch {
+    } catch (error) {
+      console.error('Error al enviar mensaje:', error);
       const errorMessage: Message = {
         from: 'bot',
-        text: '❌ Error al conectar con el agente IA.',
+        text:
+          error instanceof Error
+            ? error.message
+            : '❌ Error al conectar con el agente IA.',
       };
       setMessages((prev) => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // Permite enviar con Enter (sin Shift)
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !isLoading) {
       e.preventDefault();
       sendMessage();
     }
@@ -65,22 +77,30 @@ export default function ChatPage() {
       </h1>
 
       <div className="border rounded p-4 h-96 overflow-y-auto bg-white shadow flex flex-col">
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`mb-2 ${
-              msg.from === 'user' ? 'text-right' : 'text-left'
-            }`}
-          >
-            <span
-              className={`${
-                msg.from === 'user' ? 'text-blue-700' : 'text-green-700'
+        {messages.length === 0 ? (
+          <div className="text-gray-500 text-center my-auto">
+            Escribe un mensaje para comenzar...
+          </div>
+        ) : (
+          messages.map((msg, i) => (
+            <div
+              key={i}
+              className={`mb-2 ${
+                msg.from === 'user' ? 'text-right' : 'text-left'
               }`}
             >
-              {msg.from === 'user' ? '🧑‍💻' : '🤖'} {msg.text}
-            </span>
-          </div>
-        ))}
+              <span
+                className={`inline-block p-2 rounded-lg ${
+                  msg.from === 'user'
+                    ? 'bg-blue-100 text-blue-800'
+                    : 'bg-green-100 text-green-800'
+                }`}
+              >
+                {msg.from === 'user' ? '🧑‍💻' : '🤖'} {msg.text}
+              </span>
+            </div>
+          ))
+        )}
         <div ref={messagesEndRef} />
       </div>
 
@@ -92,16 +112,17 @@ export default function ChatPage() {
           onChange={(e) => setInput(e.target.value)}
           placeholder="Escribí tu mensaje..."
           onKeyDown={handleKeyDown}
+          disabled={isLoading}
           autoComplete="off"
           autoFocus
         />
         <button
           className="bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-50"
           onClick={sendMessage}
-          disabled={!input.trim()}
+          disabled={!input.trim() || isLoading}
           aria-label="Enviar mensaje"
         >
-          Enviar
+          {isLoading ? 'Enviando...' : 'Enviar'}
         </button>
       </div>
     </main>
